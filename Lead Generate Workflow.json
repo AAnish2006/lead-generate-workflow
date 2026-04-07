@@ -1,0 +1,292 @@
+{
+  "name": "My workflow 3",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "capture-lead",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "981ad57b-23f6-4673-b4cc-4246379e0dae",
+      "name": "Website Lead Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        512
+      ],
+      "webhookId": "website-lead-capture"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Validate & normalise the incoming lead payload ──────────\nconst body = $input.first().json.body || $input.first().json;\n\n// Pull every common field name a web form might send\nconst name    = body.name    || body.fullName  || body.full_name  || body.firstName || '';\nconst email   = body.email   || body.emailAddress || '';\nconst phone   = body.phone   || body.phoneNumber  || body.mobile   || '';\nconst company = body.company || body.companyName   || body.org      || '';\nconst subject = body.subject || body.projectType   || body.service  || 'General Inquiry';\nconst message = body.message || body.description   || body.notes    || '';\nconst source  = body.source  || body.utm_source    || 'Website Form';\nconst page    = body.page    || body.referrer      || body.pageUrl  || '';\n\n// Basic validation\nif (!email) throw new Error('Lead rejected: no email address provided');\nif (!name)  throw new Error('Lead rejected: no name provided');\n\n// Email format check\nconst emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\nif (!emailRegex.test(email)) throw new Error('Lead rejected: invalid email format');\n\n// Timestamp\nconst now       = new Date();\nconst timestamp = now.toISOString();\nconst dateStr   = now.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });\nconst timeStr   = now.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', hour12:true });\n\n// Detect if business email (not free providers)\nconst freeProviders = ['gmail.com','yahoo.com','hotmail.com','outlook.com','icloud.com','live.com'];\nconst emailDomain   = email.split('@')[1]?.toLowerCase() || '';\nconst isBusinessEmail = !freeProviders.includes(emailDomain);\n\n// Simple lead score (0–100)\nlet score = 30; // base\nif (isBusinessEmail) score += 20;\nif (phone)           score += 15;\nif (company)         score += 15;\nif (message && message.length > 60) score += 10;\nconst urgentWords = ['urgent','asap','immediately','today','quote','pricing','demo','budget'];\nif (urgentWords.some(w => (message + subject).toLowerCase().includes(w))) score += 10;\n\nconst grade = score >= 75 ? 'Hot' : score >= 50 ? 'Warm' : 'Cold';\n\nreturn [{\n  json: {\n    // Lead fields\n    name, email, phone, company, subject, message, source, page,\n    // Meta\n    timestamp, dateStr, timeStr,\n    emailDomain, isBusinessEmail,\n    // Scoring\n    score, grade,\n    // Row ID for Sheets\n    leadId: `LEAD-${Date.now()}`\n  }\n}];"
+      },
+      "id": "d796935f-bf33-49fe-986a-80ce82381f40",
+      "name": "Validate & Normalise Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -256,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Thank you {{ $json.name }}, we'll be in touch within 24 hours!\",\n  \"leadId\": \"{{ $json.leadId }}\"\n}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "491cfdca-9733-413c-b33e-1d6ffe3d60ed",
+      "name": "Return Success to Website",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -32,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "cachedResultName": "Website Leads"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Leads",
+          "cachedResultName": "Leads"
+        },
+        "options": {}
+      },
+      "id": "da0ca99c-a088-4a3f-acad-8b239c72b5de",
+      "name": "Save Lead to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        -32,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "anish@example.com",
+        "subject": "={{ $json.grade === 'Hot' ? '🔥 HOT LEAD' : $json.grade === 'Warm' ? '⚡ New Lead' : '📩 New Lead' }}: {{ $json.name }} — {{ $json.subject }}",
+        "message": "=<!DOCTYPE html>\n<html>\n<head>\n<meta charset='UTF-8'>\n<style>\n  body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f4f8; margin: 0; padding: 0; }\n  .wrap { max-width: 600px; margin: 30px auto; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }\n  .header { background: linear-gradient(135deg, #7c3aed, #a78bfa); padding: 32px 36px; }\n  .header h1 { color: #fff; margin: 0; font-size: 22px; font-weight: 700; }\n  .header p { color: #ddd6fe; margin: 6px 0 0; font-size: 13px; }\n  .grade-badge { display: inline-block; padding: 4px 14px; border-radius: 999px; font-size: 12px; font-weight: 700; margin-top: 12px; background: {{ $json.grade === 'Hot' ? '#fef3c7' : $json.grade === 'Warm' ? '#dcfce7' : '#f1f5f9' }}; color: {{ $json.grade === 'Hot' ? '#92400e' : $json.grade === 'Warm' ? '#166534' : '#475569' }}; }\n  .score-bar-wrap { background: rgba(255,255,255,0.15); border-radius: 6px; height: 6px; margin-top: 14px; }\n  .score-bar { background: #fff; border-radius: 6px; height: 6px; width: {{ $json.score }}%; }\n  .body { padding: 32px 36px; }\n  .field-row { display: flex; margin-bottom: 14px; align-items: flex-start; }\n  .field-label { min-width: 110px; font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #94a3b8; padding-top: 2px; }\n  .field-value { font-size: 14px; color: #1e293b; font-weight: 500; flex: 1; }\n  .message-box { background: #f8fafc; border-left: 3px solid #7c3aed; border-radius: 0 8px 8px 0; padding: 14px 16px; margin-top: 4px; font-size: 14px; color: #334155; line-height: 1.6; }\n  .divider { border: none; border-top: 1px solid #f1f5f9; margin: 24px 0; }\n  .cta { text-align: center; margin: 24px 0; }\n  .cta a { display: inline-block; padding: 12px 28px; background: linear-gradient(135deg, #7c3aed, #a78bfa); color: #fff; border-radius: 8px; font-weight: 600; font-size: 14px; text-decoration: none; }\n  .meta { background: #f8fafc; border-radius: 8px; padding: 14px 18px; font-size: 12px; color: #94a3b8; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }\n  .footer { text-align: center; padding: 20px; font-size: 11px; color: #cbd5e1; }\n</style>\n</head>\n<body>\n<div class='wrap'>\n  <div class='header'>\n    <h1>New Lead from Your Website</h1>\n    <p>Received {{ $json.dateStr }} at {{ $json.timeStr }}</p>\n    <div class='grade-badge'>{{ $json.grade }} Lead &nbsp;·&nbsp; Score: {{ $json.score }}/100</div>\n    <div class='score-bar-wrap'><div class='score-bar'></div></div>\n  </div>\n  <div class='body'>\n    <div class='field-row'><span class='field-label'>Name</span><span class='field-value'>{{ $json.name }}</span></div>\n    <div class='field-row'><span class='field-label'>Email</span><span class='field-value'><a href='mailto:{{ $json.email }}'>{{ $json.email }}</a></span></div>\n    {{ $json.phone ? \"<div class='field-row'><span class='field-label'>Phone</span><span class='field-value'>\" + $json.phone + \"</span></div>\" : '' }}\n    {{ $json.company ? \"<div class='field-row'><span class='field-label'>Company</span><span class='field-value'>\" + $json.company + \"</span></div>\" : '' }}\n    <div class='field-row'><span class='field-label'>Subject</span><span class='field-value'>{{ $json.subject }}</span></div>\n    <div class='field-row'>\n      <span class='field-label'>Message</span>\n      <span class='field-value'><div class='message-box'>{{ $json.message || '(no message)' }}</div></span>\n    </div>\n    <div class='field-row'><span class='field-label'>Source</span><span class='field-value'>{{ $json.source }}</span></div>\n    <hr class='divider'>\n    <div class='cta'>\n      <a href='mailto:{{ $json.email }}?subject=Re: {{ $json.subject }}'>Reply to {{ $json.name }}</a>\n    </div>\n    <div class='meta'>\n      <span>ID: {{ $json.leadId }}</span>\n      <span>{{ $json.isBusinessEmail ? 'Business email' : 'Free email' }}</span>\n      <span>Page: {{ $json.page || 'N/A' }}</span>\n    </div>\n  </div>\n  <div class='footer'>Automated by your n8n lead workflow &nbsp;·&nbsp; anish@example.com</div>\n</div>\n</body></html>",
+        "options": {
+          "replyTo": "={{ $json.email }}"
+        }
+      },
+      "id": "7d08b2b4-d11a-4e35-974b-afeba6580c2f",
+      "name": "Send Email Notification",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -32,
+        608
+      ],
+      "webhookId": "a21d3d75-74bd-41d1-b2f8-82c553899cf7"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "Thanks for reaching out, {{ $json.name }}! We got your message.",
+        "message": "=<!DOCTYPE html>\n<html>\n<head>\n<meta charset='UTF-8'>\n<style>\n  body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f4f8; margin: 0; padding: 0; }\n  .wrap { max-width: 560px; margin: 30px auto; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }\n  .header { background: linear-gradient(135deg, #7c3aed, #a78bfa); padding: 36px; text-align: center; }\n  .header h1 { color: #fff; margin: 0 0 8px; font-size: 24px; font-weight: 800; }\n  .header p { color: #ddd6fe; margin: 0; font-size: 14px; }\n  .body { padding: 36px; }\n  .body p { color: #475569; font-size: 15px; line-height: 1.7; margin-bottom: 16px; }\n  .summary-box { background: #f8fafc; border-radius: 10px; padding: 20px 24px; margin: 20px 0; border: 1px solid #e2e8f0; }\n  .summary-box p { margin: 0 0 8px; color: #64748b; font-size: 13px; }\n  .summary-box p:last-child { margin: 0; }\n  .summary-box strong { color: #1e293b; }\n  .timeline { display: flex; gap: 12px; margin: 24px 0; }\n  .step { flex: 1; text-align: center; }\n  .step-num { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #7c3aed, #a78bfa); color: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; margin: 0 auto 8px; }\n  .step-text { font-size: 11px; color: #94a3b8; }\n  .cta { text-align: center; margin: 28px 0; }\n  .cta a { display: inline-block; padding: 12px 28px; background: linear-gradient(135deg, #7c3aed, #a78bfa); color: #fff; border-radius: 8px; font-weight: 600; font-size: 14px; text-decoration: none; }\n  .footer { background: #f8fafc; text-align: center; padding: 20px; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0; }\n</style>\n</head>\n<body>\n<div class='wrap'>\n  <div class='header'>\n    <h1>Got your message!</h1>\n    <p>Thanks for reaching out, {{ $json.name }}.</p>\n  </div>\n  <div class='body'>\n    <p>Hi <strong>{{ $json.name }}</strong>,</p>\n    <p>I've received your message and will personally review it. You can expect a response within <strong>24 hours</strong> (usually much sooner).</p>\n    <div class='summary-box'>\n      <p><strong>Your enquiry summary</strong></p>\n      <p>Subject: <strong>{{ $json.subject }}</strong></p>\n      {{ $json.message ? \"<p>Message: <strong>\" + $json.message.slice(0, 120) + ($json.message.length > 120 ? '...' : '') + \"</strong></p>\" : '' }}\n      <p>Submitted: <strong>{{ $json.dateStr }} at {{ $json.timeStr }}</strong></p>\n    </div>\n    <p>While you wait, here's what happens next:</p>\n    <div class='timeline'>\n      <div class='step'><div class='step-num'>1</div><div class='step-text'>Message received &amp; reviewed</div></div>\n      <div class='step'><div class='step-num'>2</div><div class='step-text'>I'll analyse your requirements</div></div>\n      <div class='step'><div class='step-num'>3</div><div class='step-text'>Personal reply within 24h</div></div>\n    </div>\n    <p>In the meantime, feel free to connect with me on WhatsApp for a faster response.</p>\n    <div class='cta'>\n      <a href='https://wa.me/919999999999'>Chat on WhatsApp</a>\n    </div>\n  </div>\n  <div class='footer'>\n    Anish A &nbsp;·&nbsp; AI Automation &amp; FastAPI Developer &nbsp;·&nbsp; anish@example.com\n  </div>\n</div>\n</body></html>",
+        "options": {}
+      },
+      "id": "eda7e186-959a-4779-88d2-ad517b179a2f",
+      "name": "Send Auto-Reply to Lead",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -32,
+        992
+      ],
+      "webhookId": "2783374a-68f3-4f64-a219-95d24634c7bf"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {},
+          "conditions": [
+            {
+              "leftValue": "={{ $json.grade }}",
+              "rightValue": "Cold",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8ca79a47-2ed6-4765-ba70-cd7152e97035",
+      "name": "Hot or Warm Lead?",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        -32,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "cachedResultName": "Website Leads"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Hot & Warm Leads",
+          "cachedResultName": "Hot & Warm Leads"
+        },
+        "options": {}
+      },
+      "id": "e7987a13-e7c2-4bc5-822d-9cb40c2dfa76",
+      "name": "Save to Priority Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        192,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build a plain-text error response if validation fails\nconst err = $input.first().json.error || 'Unknown error';\nreturn [{ json: { success: false, error: err } }];"
+      },
+      "id": "691b325e-9b29-4ded-90e3-bd28b224a0a7",
+      "name": "Handle Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -32,
+        800
+      ],
+      "notes": "Connect the error output of 'Validate & Normalise Lead' here."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": false, \"message\": \"Invalid submission. Please check your details and try again.\" }",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "cf58a229-9b33-44a3-9340-a2f86fd76e87",
+      "name": "Return Error to Website",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        192,
+        800
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Website Lead Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate & Normalise Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Normalise Lead": {
+      "main": [
+        [
+          {
+            "node": "Return Success to Website",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Save Lead to Google Sheets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Email Notification",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Auto-Reply to Lead",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Hot or Warm Lead?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Handle Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hot or Warm Lead?": {
+      "main": [
+        [
+          {
+            "node": "Save to Priority Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Error": {
+      "main": [
+        [
+          {
+            "node": "Return Error to Website",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "554f56dc-4832-4f06-8741-f6493dc1df0c",
+  "meta": {
+    "instanceId": "7741122904d41840597174ad8de199cdfdda42313e35fb1f0f57c7f7bd81fb53"
+  },
+  "id": "DBDivp55VGu5XMQv",
+  "tags": []
+}
