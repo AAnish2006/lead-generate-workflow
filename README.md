@@ -6,7 +6,7 @@ An automated lead capture and qualification pipeline built with **n8n**. When a 
 
 ## 📸 Workflow Overview
 
-![Lead Generation Workflow](./workflow_diagram.png)
+![Lead Generation Workflow](./n8n_workflow.png)
 
 ---
 
